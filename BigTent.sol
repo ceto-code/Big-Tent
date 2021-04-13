@@ -1,4 +1,4 @@
-pragma solidity ^0.5.0;
+pragma solidity 0.5.15;
 
 import "./Hourglass.sol";
 
@@ -67,17 +67,6 @@ contract BigTent {
         }
     }
 
-    // This is an admin only function to set commit.
-    // Commits are the Keccak256 hash of some secret "reveal" random number, to be supplied
-    // by the bot in the settleBet transaction. Supplying
-    // "commit" ensures that "reveal" cannot be changed behind the scenes
-    //  after placeBet have been mined.
-
-    function setCommit(uint256 commit_) public onlyAdministrator() {
-        commit = commit_;
-        commitBlockNumber = uint40(block.number);
-    }
-
     // Method for admin to start the game
     function startGame(
         uint256 ticketPrice_,
@@ -93,9 +82,10 @@ contract BigTent {
         initialGuaranteedPrizePool = initialGuaranteedPrizePool_;
         period = period_;
         startDate = startDate_;
+        gameStarted = true;
     }
 
-    //This is the method for user to buy tickets for the raffle
+    // This is the method for user to buy tickets for the raffle
     function buyTicket(uint8 numberOfTickets) external {
         address _customerAddress = msg.sender;
 
@@ -113,25 +103,34 @@ contract BigTent {
             revert("Transfer Failed");
         }
 
-        //Maintain a list of participants
-        //Run a for loop for multiple entries
+        // Maintain a list of participants
+        // Run a for loop for multiple entries
         for (uint8 i = 0; i < numberOfTickets; i++) {
-            participants.push(_customerAddress);
-            participantsCount += 1;
+            participants.push(_customerAddress);            
         }
+        participantsCount += numberOfTickets;
 
-        //Check if totalCetoBalance is greater than or equal to GPP and the countdown hasn't been set yet
+        // Check if totalCetoBalance is greater than or equal to GPP and the countdown hasn't been set yet
         if (
             getCurrentCETOBalance() >= initialGuaranteedPrizePool &&
             countdownStartedAt == 0
         ) {
             countdownStartedAt = block.timestamp;
-            gameStarted = true;
 
             emit onGameStart(countdownStartedAt);
         }
 
         emit onTicketPurchase(_customerAddress, numberOfTickets);
+    }
+
+    // This is an admin only function to set commit.
+    // Commits are the Keccak256 hash of some secret "reveal" random number, to be supplied
+    // by the bot in the declareResult transaction. Supplying
+    // "commit" ensures that "reveal" cannot be changed behind the scenes
+    // after setCommit has been mined.
+    function setCommit(uint256 commit_) external onlyAdministrator() {
+        commit = commit_;
+        commitBlockNumber = uint40(block.number);
     }
 
     // This is the method used to settle bets. settleBet should supply a "reveal" number
@@ -145,18 +144,18 @@ contract BigTent {
         );
         require(
             getCurrentCETOBalance() >=
-                mulDiv(initialGuaranteedPrizePool, 67, 100),
+                mulDiv(initialGuaranteedPrizePool, 2, 3),
             "Insufficient amount"
         );
 
-        //Check if the reveal is valid
+        // Check if the reveal is valid
         uint256 commit_ = uint256(keccak256(abi.encodePacked(reveal)));
         require(commit_ == commit, "Invaild reveal");
 
         // Check that bet has not expired yet (see comment to BET_EXPIRATION_BLOCKS).
         require(
             block.number > commitBlockNumber,
-            "settleBet in the same block as placeBet, or before."
+            "declareResult in the same block as placeBet, or before."
         );
         require(
             block.number <= commitBlockNumber + BET_EXPIRATION_BLOCKS,
@@ -180,7 +179,7 @@ contract BigTent {
         uint256 secondIndex;
         bytes32 secondEntropy;
 
-        //Loop to avoid collisions
+        // Loop to avoid collisions
         while (secondIndex == firstIndex || runLoop) {
             secondEntropy = keccak256(abi.encodePacked(firstEntropy));
             secondIndex = uint256(secondEntropy) % participantsCount;
@@ -192,7 +191,7 @@ contract BigTent {
         uint256 thirdIndex;
         bytes32 thirdEntropy;
 
-        //Loop to avoid collisions
+        // Loop to avoid collisions
         while (
             thirdIndex == secondIndex || thirdIndex == firstIndex || runLoop
         ) {
@@ -202,7 +201,7 @@ contract BigTent {
         }
         thirdWinner = participants[thirdIndex];
 
-        //Calculate the prize money
+        // Calculate the prize money
         uint256 firstPrize;
         uint256 secondPrize;
         uint256 thirdPrize;
@@ -315,7 +314,7 @@ contract BigTent {
 
         //Calculate 67% of the amout collected
         uint256 minimumRequiredAmount =
-            mulDiv(initialGuaranteedPrizePool, 67, 100);
+            mulDiv(initialGuaranteedPrizePool, 2, 3);
 
         if (partner != address(0)) {
             //Check if the amount collected is atleast 67% of the initial GPP
@@ -342,7 +341,7 @@ contract BigTent {
         return partnerPoolFunds_;
     }
 
-    //CHECK
+    // CHECK
     function getFunds() public view returns (uint256, uint256) {
         uint256 currentPrizePool;
         uint256 nextPoolFunds = 0;
