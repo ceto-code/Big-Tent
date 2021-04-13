@@ -19,7 +19,7 @@ contract BigTent {
         0xEA46a528240ca7EbE8B0fc384a920e332D1De6C6;
     Hourglass internal CETO = Hourglass(contract_address);
 
-    uint256 internal ticketPrice; //5.5 CETO
+    uint256 internal ticketPrice; // 5.5 CETO
     address internal partner;
     uint256 internal initialGuaranteedPrizePool;
     uint256 internal period;
@@ -106,7 +106,7 @@ contract BigTent {
         // Maintain a list of participants
         // Run a for loop for multiple entries
         for (uint8 i = 0; i < numberOfTickets; i++) {
-            participants.push(_customerAddress);            
+            participants.push(_customerAddress);
         }
         participantsCount += numberOfTickets;
 
@@ -133,9 +133,9 @@ contract BigTent {
         commitBlockNumber = uint40(block.number);
     }
 
-    // This is the method used to settle bets. settleBet should supply a "reveal" number
+    // This is the method used to settle bets. declareResult should supply a "reveal" number
     // that would Keccak256-hash to "commit". "blockHash" is the block hash
-    // of placeBet block as seen by croupier; it is additionally asserted to
+    // of setCommit block as seen by croupier; it is additionally asserted to
     // prevent changing the bet outcomes on Ethereum reorgs.
     function declareResult(uint256 reveal) external onlyAdministrator() {
         require(
@@ -143,8 +143,7 @@ contract BigTent {
             "Countdown hasn't finished yet"
         );
         require(
-            getCurrentCETOBalance() >=
-                mulDiv(initialGuaranteedPrizePool, 2, 3),
+            getCurrentCETOBalance() >= mulDiv(initialGuaranteedPrizePool, 2, 3),
             "Insufficient amount"
         );
 
@@ -155,13 +154,12 @@ contract BigTent {
         // Check that bet has not expired yet (see comment to BET_EXPIRATION_BLOCKS).
         require(
             block.number > commitBlockNumber,
-            "declareResult in the same block as placeBet, or before."
+            "declareResult in the same block as setCommit, or before."
         );
         require(
             block.number <= commitBlockNumber + BET_EXPIRATION_BLOCKS,
             "Blockhash can't be queried by EVM."
         );
-        // require(blockhash(commitBlockNumber) == blockHash);
 
         uint256 currentPoolFunds;
         uint256 nextPoolFunds;
@@ -222,7 +220,7 @@ contract BigTent {
             revert("Third prize distribution failed");
         }
 
-        //Assign/Payout out the promotional partner
+        // Assign/Payout out the promotional partner
         success = CETO.transfer(partner, getPartnerPoolFunds());
         if (!success) {
             revert("Partner pool funds distribution failed");
@@ -245,34 +243,26 @@ contract BigTent {
         return CETO.myDividends(true);
     }
 
-    function getTicketPrice() public view returns (uint256) {
-        return ticketPrice;
-    }
-
-    function getPeriod() public view returns (uint256) {
-        return period;
-    }
-
-    function getParticipantsCount() public view returns (uint256) {
-        return participantsCount;
-    }
-
-    function getStartDate() public view returns (uint256) {
-        return startDate;
-    }
-
-    function getCountdownStartedAt() public view returns (uint256) {
-        return countdownStartedAt;
-    }
-
-    function getGuaranteedPrizePool() public view returns (uint256) {
-        return initialGuaranteedPrizePool;
-    }
-
-    function getProbabilityOfWinning() public view returns (uint256) {
-        //Calculate probabilty
-        uint256 probability = SafeMath.div(3, participantsCount);
-        return probability;
+    function getEventData()
+        public
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256,
+            uint256,
+            uint256,
+            uint256
+        )
+    {
+        return (
+            ticketPrice,
+            participantsCount,
+            initialGuaranteedPrizePool,
+            startDate,
+            countdownStartedAt,
+            period
+        );
     }
 
     function getPrizes()
@@ -288,8 +278,7 @@ contract BigTent {
         uint256 nextPoolFunds;
         (currentPoolFunds, nextPoolFunds) = getFunds();
 
-        //Calculate the prize money
-
+        // Calculate the prize money
         uint256 firstPrize = mulDiv(currentPoolFunds, 9, 13);
         uint256 secondPrize = mulDiv(currentPoolFunds, 3, 13);
         uint256 thirdPrize = mulDiv(currentPoolFunds, 1, 13);
@@ -308,16 +297,16 @@ contract BigTent {
         return (firstWinner, secondWinner, thirdWinner);
     }
 
-    //CHECK
+    // CHECK
     function getPartnerPoolFunds() public view returns (uint256) {
         uint256 partnerPoolFunds_ = 0;
 
-        //Calculate 67% of the amout collected
+        // Calculate 67% of the amout collected
         uint256 minimumRequiredAmount =
             mulDiv(initialGuaranteedPrizePool, 2, 3);
 
         if (partner != address(0)) {
-            //Check if the amount collected is atleast 67% of the initial GPP
+            // Check if the amount collected is atleast 67% of the initial GPP
             // if amount collected is less than 67% than the partner gets nothing
             // and all the amount goes to the prize pool
             // else 67% goes to the prize pool and the gets remaining 33% goes to the partner pool
@@ -326,7 +315,8 @@ contract BigTent {
                     getCurrentCETOBalance() -
                     minimumRequiredAmount;
             }
-            //Check if the amount collected is greater than the initial GPP
+
+            // Check if the amount collected is greater than the initial GPP
             // if yes than 50% of the difference amount goes to the partner pool
             if (getCurrentCETOBalance() > initialGuaranteedPrizePool) {
                 uint256 differenceAmount =
@@ -347,11 +337,11 @@ contract BigTent {
         uint256 nextPoolFunds = 0;
         uint256 differenceAmount;
 
-        //Calculate 67% of the amout collected
+        // Calculate 67% of the amout collected
         uint256 minimumRequiredAmount =
             mulDiv(initialGuaranteedPrizePool, 67, 100);
 
-        //Calculate the difference amount if amount collected is greater than the initial gpp
+        // Calculate the difference amount if amount collected is greater than the initial gpp
         if (getCurrentCETOBalance() > initialGuaranteedPrizePool) {
             differenceAmount =
                 getCurrentCETOBalance() -
@@ -382,7 +372,7 @@ contract BigTent {
                 currentPrizePool = getCurrentCETOBalance();
             } else {
                 currentPrizePool = mulDiv(getCurrentCETOBalance(), 67, 100);
-                //Check if the amount collected is greater than the initial GPP
+                // Check if the amount collected is greater than the initial GPP
                 // if yes than 50% of the difference amount goes to partner pool,
                 // 25% to the current prize pool and 25% to the next prize pool
                 if (getCurrentCETOBalance() > initialGuaranteedPrizePool) {
