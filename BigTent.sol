@@ -296,9 +296,7 @@ contract BigTent {
             // and all the amount goes to the prize pool
             // else 67% goes to the prize pool and the gets remaining 33% goes to the partner pool
             if (getCurrentCETOBalance() > minimumRequiredAmount) {
-                partnerPoolFunds_ =
-                    getCurrentCETOBalance() -
-                    minimumRequiredAmount;
+                partnerPoolFunds_ = mulDiv(initialGuaranteedPrizePool, 1, 3);
             }
 
             // Check if the amount collected is greater than the initial GPP
