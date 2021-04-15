@@ -8,7 +8,10 @@ contract BigTent {
     =================================*/
     modifier onlyAdministrator() {
         address _customerAddress = msg.sender;
-        require(administrators[_customerAddress]);
+        require(
+            administrators[_customerAddress],
+            "Only administrators can call this function"
+        );
         _;
     }
 
@@ -19,7 +22,7 @@ contract BigTent {
         0xEA46a528240ca7EbE8B0fc384a920e332D1De6C6;
     Hourglass internal CETO = Hourglass(contract_address);
 
-    uint256 internal ticketPrice; // 5.5 CETO
+    uint256 internal ticketPrice;
     address internal partner;
     uint256 internal initialGuaranteedPrizePool;
     uint256 internal period;
@@ -138,6 +141,8 @@ contract BigTent {
     // of setCommit block as seen by croupier; it is additionally asserted to
     // prevent changing the bet outcomes on Ethereum reorgs.
     function declareResult(uint256 reveal) external onlyAdministrator() {
+        require(participantsCount > 2, "Insufficient participants");
+
         require(
             countdownStartedAt + period <= block.timestamp,
             "Countdown hasn't finished yet"
@@ -153,17 +158,13 @@ contract BigTent {
 
         // Check that bet has not expired yet (see comment to BET_EXPIRATION_BLOCKS).
         require(
-            block.number > commitBlockNumber,
+            block.number >= commitBlockNumber,
             "declareResult in the same block as setCommit, or before."
         );
         require(
             block.number <= commitBlockNumber + BET_EXPIRATION_BLOCKS,
             "Blockhash can't be queried by EVM."
         );
-
-        uint256 currentPoolFunds;
-        uint256 nextPoolFunds;
-        (currentPoolFunds, nextPoolFunds) = getFunds();
 
         // The RNG - combine "reveal" and blockhash of setCommit using Keccak256. Miners
         // are not aware of "reveal" and cannot deduce it from "commit",
@@ -173,30 +174,19 @@ contract BigTent {
         uint256 firstIndex = uint256(firstEntropy) % participantsCount;
         firstWinner = participants[firstIndex];
 
-        bool runLoop = true;
-        uint256 secondIndex;
-        bytes32 secondEntropy;
-
-        // Loop to avoid collisions
-        while (secondIndex == firstIndex || runLoop) {
-            secondEntropy = keccak256(abi.encodePacked(firstEntropy));
-            secondIndex = uint256(secondEntropy) % participantsCount;
-            runLoop = false;
-        }
+        bytes32 secondEntropy = keccak256(abi.encodePacked(firstEntropy));
+        uint256 secondIndex =
+            (uint256(secondEntropy) % (participantsCount - 1));
+        secondIndex = secondIndex < firstIndex ? secondIndex : secondIndex + 1;
         secondWinner = participants[secondIndex];
 
-        runLoop = true;
-        uint256 thirdIndex;
-        bytes32 thirdEntropy;
-
-        // Loop to avoid collisions
-        while (
-            thirdIndex == secondIndex || thirdIndex == firstIndex || runLoop
-        ) {
-            thirdEntropy = keccak256(abi.encodePacked(secondEntropy));
-            thirdIndex = uint256(thirdEntropy) % participantsCount;
-            runLoop = false;
-        }
+        bytes32 thirdEntropy = keccak256(abi.encodePacked(secondEntropy));
+        uint256 thirdIndex = uint256(thirdEntropy) % (participantsCount - 2);
+        thirdIndex = thirdIndex < min(secondIndex, firstIndex)
+            ? thirdIndex
+            : thirdIndex < (max(secondIndex, firstIndex) - 1)
+            ? thirdIndex + 1
+            : thirdIndex + 2;
         thirdWinner = participants[thirdIndex];
 
         // Calculate the prize money
@@ -228,7 +218,6 @@ contract BigTent {
 
         // Resetting the data
         countdownStartedAt = 0;
-        initialGuaranteedPrizePool = nextPoolFunds;
         delete participants;
         participantsCount = 0;
         gameStarted = false;
@@ -239,12 +228,8 @@ contract BigTent {
         return CETO.myTokens();
     }
 
-    function getCurrentCETODividends() public view returns (uint256) {
-        return CETO.myDividends(true);
-    }
-
     function getEventData()
-        public
+        external
         view
         returns (
             uint256,
@@ -252,7 +237,8 @@ contract BigTent {
             uint256,
             uint256,
             uint256,
-            uint256
+            uint256,
+            bool
         )
     {
         return (
@@ -261,7 +247,8 @@ contract BigTent {
             initialGuaranteedPrizePool,
             startDate,
             countdownStartedAt,
-            period
+            period,
+            gameStarted
         );
     }
 
@@ -274,9 +261,7 @@ contract BigTent {
             uint256
         )
     {
-        uint256 currentPoolFunds;
-        uint256 nextPoolFunds;
-        (currentPoolFunds, nextPoolFunds) = getFunds();
+        uint256 currentPoolFunds = getFunds();
 
         // Calculate the prize money
         uint256 firstPrize = mulDiv(currentPoolFunds, 9, 13);
@@ -286,7 +271,7 @@ contract BigTent {
     }
 
     function getWinners()
-        public
+        external
         view
         returns (
             address,
@@ -332,14 +317,14 @@ contract BigTent {
     }
 
     // CHECK
-    function getFunds() public view returns (uint256, uint256) {
+    function getFunds() public view returns (uint256) {
         uint256 currentPrizePool;
         uint256 nextPoolFunds = 0;
         uint256 differenceAmount;
 
         // Calculate 67% of the amout collected
         uint256 minimumRequiredAmount =
-            mulDiv(initialGuaranteedPrizePool, 67, 100);
+            mulDiv(initialGuaranteedPrizePool, 2, 3);
 
         // Calculate the difference amount if amount collected is greater than the initial gpp
         if (getCurrentCETOBalance() > initialGuaranteedPrizePool) {
@@ -357,10 +342,7 @@ contract BigTent {
                     initialGuaranteedPrizePool,
                     SafeMath.div(differenceAmount, 2)
                 );
-                nextPoolFunds += SafeMath.add(
-                    nextPoolFunds,
-                    SafeMath.div(differenceAmount, 2)
-                );
+                nextPoolFunds = SafeMath.div(differenceAmount, 2);
             } else {
                 currentPrizePool = initialGuaranteedPrizePool;
             }
@@ -371,7 +353,7 @@ contract BigTent {
             if (getCurrentCETOBalance() <= minimumRequiredAmount) {
                 currentPrizePool = getCurrentCETOBalance();
             } else {
-                currentPrizePool = mulDiv(getCurrentCETOBalance(), 67, 100);
+                currentPrizePool = mulDiv(getCurrentCETOBalance(), 2, 3);
                 // Check if the amount collected is greater than the initial GPP
                 // if yes than 50% of the difference amount goes to partner pool,
                 // 25% to the current prize pool and 25% to the next prize pool
@@ -380,24 +362,33 @@ contract BigTent {
                         currentPrizePool,
                         SafeMath.div(differenceAmount, 4)
                     );
-                    nextPoolFunds += SafeMath.add(
-                        currentPrizePool,
-                        SafeMath.div(differenceAmount, 4)
-                    );
+                    nextPoolFunds = SafeMath.div(differenceAmount, 4);
                 }
             }
         }
 
-        return (currentPrizePool, nextPoolFunds);
+        return currentPrizePool;
     }
 
     /*----------  ADMINISTRATOR ONLY FUNCTIONS  ----------*/
 
     function setAdministrator(address _identifier, bool _status)
-        public
+        external
         onlyAdministrator()
     {
         administrators[_identifier] = _status;
+    }
+
+    // Function to transfer the funds to administrator
+    function transferFunds() external onlyAdministrator() {
+        require(!gameStarted, "Game has already been started");
+
+        address administrator_ = msg.sender;
+
+        bool success = CETO.transfer(administrator_, getCurrentCETOBalance());
+        if (!success) {
+            revert("Transfer failed");
+        }
     }
 
     /**
@@ -408,7 +399,7 @@ contract BigTent {
         uint24 period_,
         uint256 rewardPerInvocation,
         uint256 minimumDividendValue
-    ) public onlyAdministrator() {
+    ) external onlyAdministrator() {
         CETO.reinvest(
             setUpAutoReinvest,
             period_,
