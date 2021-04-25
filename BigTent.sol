@@ -18,9 +18,9 @@ contract BigTent {
     /*=====================================
     =            CONFIGURABLES            =
     =====================================*/
-    address payable internal constant contract_address =
+    address payable internal constant CETO_CONTRACT_ADDRESS =
         0xEA46a528240ca7EbE8B0fc384a920e332D1De6C6;
-    Hourglass internal CETO = Hourglass(contract_address);
+    Hourglass internal CETO = Hourglass(CETO_CONTRACT_ADDRESS);
 
     uint256 internal ticketPrice;
     address internal partner;
@@ -32,16 +32,124 @@ contract BigTent {
     address[] internal participants;
     uint256 internal participantsCount = 0;
     bool internal gameStarted = false;
+    bool internal resultDeclared = false;
 
-    uint256 internal currentRebate = 0;
-
-    address internal firstWinner;
-    address internal secondWinner;
-    address internal thirdWinner;
+    uint256 internal firstWinnerIndex;
+    uint256 internal secondWinnerIndex;
+    uint256 internal thirdWinnerIndex;
 
     uint256 internal commit = 0;
     uint256 constant BET_EXPIRATION_BLOCKS = 250;
     uint40 internal commitBlockNumber;
+    uint256 internal startingTronBalance;
+    
+    // to keep track of the CETO collected for a particular game
+    uint256 internal totalCETOCollected;
+
+    // REBATE TRACKING
+
+    // amount of ceto sent with their buy timestamp for each address
+    struct TimestampedCETODeposit {
+        uint256 value;
+        uint256 gameNumber;
+        uint256 valueSold;
+    }
+
+    mapping(address => TimestampedCETODeposit[]) internal cetoTimestampedLedger;
+
+    // The start and end index of the unsold timestamped transactions list
+    struct DepositCursor {
+        uint256 start;
+        uint256 end;
+    }
+
+    mapping(address => DepositCursor) internal cetoTimestampedCursor;
+
+    // The game number
+    // Increment this number every time a new game is started
+    uint256 gameNumber = 0;
+
+    // Mapping to keep track of The dividend collected and the total amount deposited for each game
+    struct GameResult {
+        uint256 dividendCollected;
+        uint256 totalCetoDeposited;
+    }
+    mapping(uint256 => GameResult) internal gameResults;
+
+    function getEquivalentTron(TimestampedCETODeposit storage _deposit) private view returns (uint256){
+        // Check if the gameNumber is associated with the ongoing game
+        if(_deposit.gameNumber == gameNumber && gameStarted){
+            return uint256(0);
+        }
+
+        GameResult storage _gameResult = gameResults[_deposit.gameNumber];
+        uint256 equivalentTron = mulDiv(
+            SafeMath.sub(_deposit.value, _deposit.valueSold),
+            _gameResult.dividendCollected,
+            _gameResult.totalCetoDeposited
+        );
+        return equivalentTron;
+    }
+
+    function withdrawRebate(uint256 tronToWithdraw) public {
+        // Check if the balance is enough
+        uint256 rebateBalance = getRebateBalance();
+        require(rebateBalance >= tronToWithdraw, "Don't have enough balance");
+        
+        // Starting the from the first block on cetoTimestampedLedger keep moving forward
+        // until the until sum of value available is enough to cover the withdrawal amount
+        uint256 tronFound = 0;
+        address _customerAddress = msg.sender;
+        
+        // Update the ledger
+        // TODO: Check if storage is required here
+        DepositCursor storage _customerCursor =
+            cetoTimestampedCursor[_customerAddress];
+        uint256 counter = _customerCursor.start;
+
+        while (counter <= _customerCursor.end) {
+            TimestampedCETODeposit storage _deposit =
+                cetoTimestampedLedger[_customerAddress][counter];
+            uint256 tronAvailable = getEquivalentTron(_deposit);
+            uint256 tronRequired = SafeMath.sub(tronToWithdraw, tronFound);
+
+            if (tronAvailable < tronRequired) {
+                tronFound += tronAvailable;
+                delete cetoTimestampedLedger[_customerAddress][counter];
+            } else if (tronAvailable == tronRequired) {
+                delete cetoTimestampedLedger[_customerAddress][counter];
+                _customerCursor.start = counter + 1;
+                break;
+            } else {
+                GameResult storage _gameResult = gameResults[_deposit.gameNumber];
+                _deposit.valueSold += mulDiv(
+                    tronRequired,
+                    _gameResult.totalCetoDeposited,
+                    _gameResult.dividendCollected
+                );
+                _customerCursor.start = counter;
+                break;
+            }
+            counter += 1;
+        }
+
+        // Send the money
+        address payable _payableCustomerAddress = address(uint160(_customerAddress));
+        _payableCustomerAddress.transfer(tronToWithdraw);
+    }
+
+    function getRebateBalance() public view returns (uint256) {
+        // Calculate the balance by iterating through the cetoTimestampedLedger
+        address _customerAddress = msg.sender;
+        DepositCursor storage customerCursor = cetoTimestampedCursor[_customerAddress];
+        uint256 _rebateBalance = 0;
+        for(uint256 i = customerCursor.start; i <= customerCursor.end; i++){
+            _rebateBalance += getEquivalentTron(
+                cetoTimestampedLedger[_customerAddress][i]
+            );
+        }
+        return _rebateBalance;
+    }
 
     /************mappings************/
     mapping(address => bool) public administrators;
@@ -52,6 +160,14 @@ contract BigTent {
     event onTicketPurchase(
         address indexed customerAddress,
         uint8 numberOfTickets
+    );
+    event onGameEnd(
+        address firstWinner,
+        address secondtWinner,
+        address thirdWinner,
+        uint256 firstPrize,
+        uint256 secondPrize,
+        uint256 thirdPrize
     );
     event onGameStart(uint256 countdownStartedAt);
 
@@ -65,7 +181,7 @@ contract BigTent {
      * Return it.
      */
     function() external payable {
-        if (msg.sender != contract_address) {
+        if (msg.sender != CETO_CONTRACT_ADDRESS) {
             revert();
         }
     }
@@ -86,6 +202,33 @@ contract BigTent {
         period = period_;
         startDate = startDate_;
         gameStarted = true;
+        startingTronBalance = updateAndFetchTronBalance();
+        // Increment the game number by one
+        gameNumber += 1;
+    }
+
+    // This is the method for user to buy tickets for the raffle
+    function buyTicketWithTron(uint8 numberOfTickets) external payable{
+        uint256 tronAmountSent = msg.value;
+        address _customerAddress = msg.sender;
+
+        uint256 cetoBought = CETO.calculateTokensReceived(tronAmountSent);
+
+        uint256 cetoCostOfTickets =
+            SafeMath.mul(ticketPrice, uint256(numberOfTickets));
+
+        require(cetoBought >= cetoCostOfTickets, "Can't buy enough CETO to cover the ticket cost");
+
+        // Buy the CETO
+        CETO.buy.value(tronAmountSent)(address(this));
+
+        // Send the excess CETO back
+        if(cetoBought > cetoCostOfTickets){
+            bool transferSuccess = CETO.transfer(_customerAddress, cetoBought - cetoCostOfTickets);
+            require(transferSuccess, "Unable to transfer excess CETO");
+        }
+
+        _allocateTickets(_customerAddress, numberOfTickets);
     }
 
     // This is the method for user to buy tickets for the raffle
@@ -106,12 +249,27 @@ contract BigTent {
             revert("Transfer Failed");
         }
 
+        _allocateTickets(_customerAddress, numberOfTickets);
+    }
+
+    function _allocateTickets(address _customerAddress, uint8 numberOfTickets) internal {
+
         // Maintain a list of participants
         // Run a for loop for multiple entries
         for (uint8 i = 0; i < numberOfTickets; i++) {
             participants.push(_customerAddress);
         }
         participantsCount += numberOfTickets;
+
+        uint256 cetoCostOfTickets =
+            SafeMath.mul(ticketPrice, uint256(numberOfTickets));
+        totalCETOCollected += cetoCostOfTickets;
+
+        // Store this is buy in the deposit ledger
+        cetoTimestampedLedger[_customerAddress].push(
+            TimestampedCETODeposit(cetoCostOfTickets, gameNumber, 0)
+        );
+        cetoTimestampedCursor[_customerAddress].end += 1;
 
         // Check if totalCetoBalance is greater than or equal to GPP and the countdown hasn't been set yet
         if (
@@ -141,14 +299,18 @@ contract BigTent {
     // of setCommit block as seen by croupier; it is additionally asserted to
     // prevent changing the bet outcomes on Ethereum reorgs.
     function declareResult(uint256 reveal) external onlyAdministrator() {
+        require(gameStarted, "A game isn't running right now");
+        require(!resultDeclared, "Result is already declared");
+
         require(participantsCount > 2, "Insufficient participants");
 
         require(
             countdownStartedAt + period <= block.timestamp,
             "Countdown hasn't finished yet"
         );
+        
         require(
-            getCurrentCETOBalance() >= mulDiv(initialGuaranteedPrizePool, 2, 3),
+            totalCETOCollected >= mulDiv(initialGuaranteedPrizePool, 2, 3),
             "Insufficient amount"
         );
 
@@ -171,23 +333,25 @@ contract BigTent {
         // and house is unable to alter the "reveal" after setCommit has been mined.
         bytes32 firstEntropy =
             keccak256(abi.encodePacked(reveal, blockhash(commitBlockNumber)));
-        uint256 firstIndex = uint256(firstEntropy) % participantsCount;
-        firstWinner = participants[firstIndex];
+        firstWinnerIndex = uint256(firstEntropy) % participantsCount;
+        address firstWinner = participants[firstWinnerIndex];
 
         bytes32 secondEntropy = keccak256(abi.encodePacked(firstEntropy));
-        uint256 secondIndex =
-            (uint256(secondEntropy) % (participantsCount - 1));
-        secondIndex = secondIndex < firstIndex ? secondIndex : secondIndex + 1;
-        secondWinner = participants[secondIndex];
+        secondWinnerIndex = (uint256(secondEntropy) % (participantsCount - 1));
+        secondWinnerIndex = secondWinnerIndex < firstWinnerIndex
+            ? secondWinnerIndex
+            : secondWinnerIndex + 1;
+        address secondWinner = participants[secondWinnerIndex];
 
         bytes32 thirdEntropy = keccak256(abi.encodePacked(secondEntropy));
-        uint256 thirdIndex = uint256(thirdEntropy) % (participantsCount - 2);
-        thirdIndex = thirdIndex < min(secondIndex, firstIndex)
-            ? thirdIndex
-            : thirdIndex < (max(secondIndex, firstIndex) - 1)
-            ? thirdIndex + 1
-            : thirdIndex + 2;
-        thirdWinner = participants[thirdIndex];
+        thirdWinnerIndex = uint256(thirdEntropy) % (participantsCount - 2);
+        thirdWinnerIndex = thirdWinnerIndex <
+            min(secondWinnerIndex, firstWinnerIndex)
+            ? thirdWinnerIndex
+            : thirdWinnerIndex < (max(secondWinnerIndex, firstWinnerIndex) - 1)
+            ? thirdWinnerIndex + 1
+            : thirdWinnerIndex + 2;
+        address thirdWinner = participants[thirdWinnerIndex];
 
         // Calculate the prize money
         uint256 firstPrize;
@@ -216,11 +380,43 @@ contract BigTent {
             revert("Partner pool funds distribution failed");
         }
 
+        // Calculate the dividend collected
+        uint256 tronCollected = updateAndFetchTronBalance() - startingTronBalance;
+        gameResults[gameNumber] = GameResult(tronCollected, totalCETOCollected);
+
+        resultDeclared = true;
+
+        emit onGameEnd(
+            participants[firstWinnerIndex],
+            participants[secondWinnerIndex],
+            participants[thirdWinnerIndex],
+            firstPrize,
+            secondPrize,
+            thirdPrize
+        );
+    }
+
+    function updateAndFetchTronBalance() private returns (uint256){
+        if(CETO.myDividends(true) > 0){
+            CETO.withdraw();
+        }
+        uint256 tronBalance = address(this).balance;
+        return tronBalance;
+    }
+
+    function resetGame() external onlyAdministrator() {
+        require(gameStarted, "A game isn't running right now");
+        require(resultDeclared, "Result isn't declared yet");
+
         // Resetting the data
         countdownStartedAt = 0;
         delete participants;
         participantsCount = 0;
+
         gameStarted = false;
+
+        resultDeclared = false;
+        totalCETOCollected = 0;
     }
 
     /*----------  READ ONLY FUNCTIONS  ----------*/
@@ -238,6 +434,7 @@ contract BigTent {
             uint256,
             uint256,
             uint256,
+            bool,
             bool
         )
     {
@@ -248,7 +445,8 @@ contract BigTent {
             startDate,
             countdownStartedAt,
             period,
-            gameStarted
+            gameStarted,
+            resultDeclared
         );
     }
 
@@ -279,7 +477,23 @@ contract BigTent {
             address
         )
     {
-        return (firstWinner, secondWinner, thirdWinner);
+        return (
+            participants[firstWinnerIndex],
+            participants[secondWinnerIndex],
+            participants[thirdWinnerIndex]
+        );
+    }
+
+    function getWinnersIndex()
+        external
+        view
+        returns (
+            uint256,
+            uint256,
+            uint256
+        )
+    {
+        return (firstWinnerIndex, secondWinnerIndex, thirdWinnerIndex);
     }
 
     // CHECK
@@ -320,7 +534,7 @@ contract BigTent {
         uint256 nextPoolFunds = 0;
         uint256 differenceAmount;
 
-        // Calculate 67% of the amout collected
+        // Calculate 66.666% of the amout collected
         uint256 minimumRequiredAmount =
             mulDiv(initialGuaranteedPrizePool, 2, 3);
 
@@ -377,7 +591,9 @@ contract BigTent {
         administrators[_identifier] = _status;
     }
 
-    // Function to transfer the funds to administrator
+    // Function to transfer the remaining funds to administrator when the game 
+    // has ended and the admin wishes to replace this contract with another 
+    // upgraded contract
     function transferFunds() external onlyAdministrator() {
         require(!gameStarted, "Game has already been started");
 
@@ -387,23 +603,6 @@ contract BigTent {
         if (!success) {
             revert("Transfer failed");
         }
-    }
-
-    /**
-     * Reinvest function for the admin
-     */
-    function Reinvest(
-        bool setUpAutoReinvest,
-        uint24 period_,
-        uint256 rewardPerInvocation,
-        uint256 minimumDividendValue
-    ) external onlyAdministrator() {
-        CETO.reinvest(
-            setUpAutoReinvest,
-            period_,
-            rewardPerInvocation,
-            minimumDividendValue
-        );
     }
 
     /*----------  HELPERS AND CALCULATORS  ----------*/
@@ -422,6 +621,20 @@ contract BigTent {
         if (mm < l) {
             h -= 1;
         }
+    }
+
+    /**
+     * @dev calculates max.
+     */
+    function max(uint256 x, uint256 y) public pure returns (uint256) {
+        return x > y ? x : y;
+    }
+
+    /**
+     * @dev calculates min.
+     */
+    function min(uint256 x, uint256 y) public pure returns (uint256) {
+        return x < y ? x : y;
     }
 
     /**
