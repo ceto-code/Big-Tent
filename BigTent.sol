@@ -19,7 +19,7 @@ contract BigTent {
     =            CONFIGURABLES            =
     =====================================*/
     address payable internal constant CETO_CONTRACT_ADDRESS =
-        0xE1300B1695De30618bBbE535e0eAc57C95fA17C5;
+        0x0E0e76fF0f7F9b22b2f9D47624c2f6Ac5a4dE54E;
     Hourglass internal CETO = Hourglass(CETO_CONTRACT_ADDRESS);
 
     uint256 public ticketPrice;
@@ -77,7 +77,8 @@ contract BigTent {
     mapping(uint256 => GameResult) internal gameResults;
 
     // Mapping to store ticket count of every user
-    mapping(address => uint256) internal TicketsPerAddress;
+    mapping(uint256 => mapping(address => uint256))
+        internal TicketsPerAddressForGame;
 
     function getEquivalentTron(TimestampedCETODeposit storage _deposit)
         private
@@ -228,6 +229,9 @@ contract BigTent {
         period = period_;
         startDate = startDate_;
         gameStarted = true;
+        resultDeclared = false;
+        delete participants;
+
         startingTronBalance = updateAndFetchTronBalance();
         // Increment the game number by one
         gameNumber += 1;
@@ -300,7 +304,9 @@ contract BigTent {
         );
         cetoTimestampedCursor[_customerAddress].end += 1;
 
-        TicketsPerAddress[_customerAddress] += uint256(numberOfTickets);
+        TicketsPerAddressForGame[gameNumber][_customerAddress] += uint256(
+            numberOfTickets
+        );
         // Check if totalCetoBalance is greater than or equal to GPP and the countdown hasn't been set yet
         if (
             getCurrentCETOBalance() >= initialGuaranteedPrizePool &&
@@ -333,6 +339,10 @@ contract BigTent {
         onlyAdministrator
         returns (uint256)
     {
+        // Check if the reveal is valid
+        uint256 commit_ = uint256(keccak256(abi.encodePacked(reveal)));
+        require(commit_ == commit, "Invaild reveal");
+
         require(gameStarted, "A game isn't running right now");
         require(!resultDeclared, "Result is already declared");
 
@@ -347,10 +357,6 @@ contract BigTent {
             totalCETOCollected >= mulDiv(initialGuaranteedPrizePool, 2, 3),
             "Insufficient amount"
         );
-
-        // Check if the reveal is valid
-        uint256 commit_ = uint256(keccak256(abi.encodePacked(reveal)));
-        require(commit_ == commit, "Invaild reveal");
 
         // Check that bet has not expired yet (see comment to BET_EXPIRATION_BLOCKS).
         require(
@@ -458,12 +464,10 @@ contract BigTent {
         period = 0;
         startDate = 0;
         countdownStartedAt = 0;
-        delete participants;
         participantsCount = 0;
 
         gameStarted = false;
 
-        resultDeclared = false;
         totalCETOCollected = 0;
     }
 
@@ -508,7 +512,7 @@ contract BigTent {
     }
 
     function getUserTickets() public view returns (uint256) {
-        return TicketsPerAddress[msg.sender];
+        return TicketsPerAddressForGame[gameNumber][msg.sender];
     }
 
     function getGameResult(uint256 game)
