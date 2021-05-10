@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "solc": "^0.5.9",
+    "tron-tx-decoder": "^2.0.2",
+    "tronbox": "^2.7.17",
+    "tronweb": "^2.10.2"
+  }
+}
