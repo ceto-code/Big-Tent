@@ -40,6 +40,7 @@ contract BigTent {
 
     uint256 internal commit = 0;
     uint256 constant BET_EXPIRATION_BLOCKS = 250;
+    uint256 constant MIN_CETO = 871;
     uint40 internal commitBlockNumber;
     uint256 public startingTronBalance;
 
@@ -104,9 +105,9 @@ contract BigTent {
         // Check if the balance is enough
         uint256 rebateBalance = getRebateBalance();
         require(rebateBalance >= tronToWithdraw, "Don't have enough balance");
-        
+
         uint256 cetoBought = CETO.calculateTokensReceived(tronToWithdraw);
-        require(cetoBought >= 871, "Rebate amount too small");
+        require(cetoBought >= MIN_CETO, "Rebate amount too small");
 
         // Starting the from the first block on cetoTimestampedLedger keep moving forward
         // until the until sum of value available is enough to cover the withdrawal amount
@@ -258,7 +259,7 @@ contract BigTent {
 
         // Send the excess CETO back
         uint256 amountToRefund = cetoBought - cetoCostOfTickets;
-        if (cetoBought > cetoCostOfTickets && amountToRefund >= 871) {
+        if (cetoBought > cetoCostOfTickets && amountToRefund >= MIN_CETO) {
             bool transferSuccess =
                 CETO.transfer(_customerAddress, amountToRefund);
             require(transferSuccess, "Unable to transfer excess CETO");
