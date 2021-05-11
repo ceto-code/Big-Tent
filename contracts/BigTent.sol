@@ -106,9 +106,6 @@ contract BigTent {
         uint256 rebateBalance = getRebateBalance();
         require(rebateBalance >= tronToWithdraw, "Don't have enough balance");
 
-        uint256 cetoBought = CETO.calculateTokensReceived(tronToWithdraw);
-        require(cetoBought >= MIN_CETO, "Rebate amount too small");
-
         // Starting the from the first block on cetoTimestampedLedger keep moving forward
         // until the until sum of value available is enough to cover the withdrawal amount
         uint256 tronFound = 0;
@@ -148,6 +145,8 @@ contract BigTent {
         }
 
         // Buy rebate CETO
+        uint256 cetoBought = CETO.calculateTokensReceived(tronToWithdraw);
+
         CETO.buy.value(tronToWithdraw)(address(this));
         bool transferSuccess = CETO.transfer(_customerAddress, cetoBought);
         require(transferSuccess, "Unable to buy rebate CETO");
@@ -259,7 +258,7 @@ contract BigTent {
 
         // Send the excess CETO back
         uint256 amountToRefund = cetoBought - cetoCostOfTickets;
-        if (cetoBought > cetoCostOfTickets && amountToRefund >= MIN_CETO) {
+        if (cetoBought > cetoCostOfTickets) {
             bool transferSuccess =
                 CETO.transfer(_customerAddress, amountToRefund);
             require(transferSuccess, "Unable to transfer excess CETO");
@@ -512,6 +511,13 @@ contract BigTent {
 
     function getCurrentCETOBalance() public view returns (uint256) {
         return CETO.myTokens();
+    }
+
+    function getTokenFee(uint256 _amount) public view returns (uint256) {
+        uint256 cetoBought = CETO.calculateTokensReceived(_amount);
+        uint256 _tokenFee = SafeMath.div(cetoBought, 10);
+
+        return _tokenFee;
     }
 
     function getUserTickets() public view returns (uint256) {
