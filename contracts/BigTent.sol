@@ -20,7 +20,7 @@ contract BigTent {
     =            CONFIGURABLES            =
     =====================================*/
     address payable internal constant CETO_CONTRACT_ADDRESS =
-        0x0E0e76fF0f7F9b22b2f9D47624c2f6Ac5a4dE54E;
+        0x0b84765BdCf9e29777e2444F7aAE6BD5921DE20b;
     Hourglass internal CETO = Hourglass(CETO_CONTRACT_ADDRESS);
 
     uint256 public ticketPrice;
