@@ -37,6 +37,9 @@ contract BigTent {
     uint256 internal firstWinnerIndex;
     uint256 internal secondWinnerIndex;
     uint256 internal thirdWinnerIndex;
+    uint256 internal firstPrizeProportion;
+    uint256 internal secondPrizeProportion;
+    uint256 internal thirdPrizeProportion;
 
     uint256 internal commit = 0;
     uint256 constant BET_EXPIRATION_BLOCKS = 250;
@@ -220,7 +223,10 @@ contract BigTent {
         address partner_,
         uint256 initialGuaranteedPrizePool_,
         uint256 period_,
-        uint256 startDate_
+        uint256 startDate_,
+        uint256 firstPrizeProportion_,
+        uint256 secondPrizeProportion_,
+        uint256 thirdPrizeProportion_
     ) external onlyAdministrator() {
         require(!gameStarted, "Game has already been started");
 
@@ -232,7 +238,9 @@ contract BigTent {
         gameStarted = true;
         resultDeclared = false;
         delete participants;
-
+        firstPrizeProportion = firstPrizeProportion_;
+        secondPrizeProportion = secondPrizeProportion_;
+        thirdPrizeProportion = thirdPrizeProportion_;
         startingTronBalance = updateAndFetchTronBalance();
         // Increment the game number by one
         gameNumber += 1;
@@ -572,11 +580,16 @@ contract BigTent {
         )
     {
         uint256 currentPoolFunds = getFunds();
+        uint256 totalProportion =
+            firstPrizeProportion + secondPrizeProportion + thirdPrizeProportion;
 
         // Calculate the prize money
-        uint256 firstPrize = mulDiv(currentPoolFunds, 9, 13);
-        uint256 secondPrize = mulDiv(currentPoolFunds, 3, 13);
-        uint256 thirdPrize = mulDiv(currentPoolFunds, 1, 13);
+        uint256 firstPrize =
+            mulDiv(currentPoolFunds, firstPrizeProportion, totalProportion);
+        uint256 secondPrize =
+            mulDiv(currentPoolFunds, secondPrizeProportion, totalProportion);
+        uint256 thirdPrize =
+            mulDiv(currentPoolFunds, thirdPrizeProportion, totalProportion);
         return (firstPrize, secondPrize, thirdPrize);
     }
 
