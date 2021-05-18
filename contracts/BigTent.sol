@@ -3,6 +3,7 @@ pragma solidity 0.5.15;
 import "./Hourglass.sol";
 
 contract BigTent {
+
     /*=================================
     =            MODIFIERS            =
     =================================*/
@@ -105,6 +106,7 @@ contract BigTent {
     }
 
     function withdrawRebate(uint256 tronToWithdraw) public {
+
         // Check if the balance is enough
         uint256 rebateBalance = getRebateBalance();
         require(rebateBalance >= tronToWithdraw, "Don't have enough balance");
@@ -115,9 +117,7 @@ contract BigTent {
         address _customerAddress = msg.sender;
 
         // Update the ledger
-        // TODO: Check if storage is required here
-        DepositCursor storage _customerCursor =
-            cetoTimestampedCursor[_customerAddress];
+        DepositCursor storage _customerCursor = cetoTimestampedCursor[_customerAddress];
         uint256 counter = _customerCursor.start;
 
         while (counter <= _customerCursor.end) {
@@ -191,6 +191,7 @@ contract BigTent {
         address indexed customerAddress,
         uint8 numberOfTickets
     );
+    
     event onGameEnd(
         uint256 gameNumber,
         address firstWinner,
@@ -200,6 +201,7 @@ contract BigTent {
         uint256 secondPrize,
         uint256 thirdPrize
     );
+    
     event onGameStart(uint256 countdownStartedAt);
 
     constructor() public {
@@ -264,11 +266,10 @@ contract BigTent {
         // Buy the CETO
         CETO.buy.value(tronAmountSent)(address(this));
 
-        // Send the excess CETO back
-        uint256 amountToRefund = cetoBought - cetoCostOfTickets;
         if (cetoBought > cetoCostOfTickets) {
-            bool transferSuccess =
-                CETO.transfer(_customerAddress, amountToRefund);
+            // Send the excess CETO back
+            uint256 amountToRefund = SafeMath.sub(cetoBought, cetoCostOfTickets);
+            bool transferSuccess = CETO.transfer(_customerAddress, amountToRefund);
             require(transferSuccess, "Unable to transfer excess CETO");
         }
 
@@ -304,9 +305,8 @@ contract BigTent {
         }
         participantsCount += numberOfTickets;
 
-        uint256 cetoCostOfTickets =
-            SafeMath.mul(ticketPrice, uint256(numberOfTickets));
-        totalCETOCollected += cetoCostOfTickets;
+        uint256 cetoCostOfTickets = SafeMath.mul(ticketPrice, uint256(numberOfTickets));
+        totalCETOCollected = SafeMath.add(totalCETOCollected, cetoCostOfTickets);
 
         // Store this buy in the deposit ledger
         cetoTimestampedLedger[_customerAddress].push(
@@ -317,6 +317,7 @@ contract BigTent {
         TicketsPerAddressForGame[gameNumber][_customerAddress] += uint256(
             numberOfTickets
         );
+
         // Check if totalCetoBalance is greater than or equal to GPP and the countdown hasn't been set yet
         if (
             getCurrentCETOBalance() >= initialGuaranteedPrizePool &&
@@ -364,7 +365,7 @@ contract BigTent {
         );
 
         require(
-            totalCETOCollected >= mulDiv(initialGuaranteedPrizePool, 2, 3),
+            getCurrentCETOBalance() >= mulDiv(initialGuaranteedPrizePool, 2, 3),
             "Insufficient amount"
         );
 
@@ -585,16 +586,28 @@ contract BigTent {
 
         // Calculate the prize money
         if (totalProportion != 0) {
+            
             uint256 firstPrize =
-                mulDiv(currentPoolFunds, firstPrizeProportion, totalProportion);
+                mulDiv(
+                    currentPoolFunds,
+                    firstPrizeProportion,
+                    totalProportion
+                );
+            
             uint256 secondPrize =
                 mulDiv(
                     currentPoolFunds,
                     secondPrizeProportion,
                     totalProportion
                 );
+            
             uint256 thirdPrize =
-                mulDiv(currentPoolFunds, thirdPrizeProportion, totalProportion);
+                mulDiv(
+                    currentPoolFunds,
+                    thirdPrizeProportion,
+                    totalProportion
+                );
+            
             return (firstPrize, secondPrize, thirdPrize);
         } else {
             return (0, 0, 0);
@@ -631,6 +644,7 @@ contract BigTent {
 
     function getPartnerPoolFunds() public view returns (uint256) {
         uint256 partnerPoolFunds_ = 0;
+        uint256 currentCETOBalance = getCurrentCETOBalance();
 
         // Calculate 67% of the amout collected
         uint256 minimumRequiredAmount =
@@ -638,18 +652,17 @@ contract BigTent {
 
         if (partner != address(0)) {
             // Check if the amount collected is atleast 67% of the initial GPP
-            // if amount collected is less than 67% than the partner gets nothing
+            // if amount collected is less than 67% then the partner gets nothing
             // and all the amount goes to the prize pool
-            // else 67% goes to the prize pool and the gets remaining 33% goes to the partner pool
-            if (getCurrentCETOBalance() > minimumRequiredAmount) {
-                partnerPoolFunds_ = mulDiv(initialGuaranteedPrizePool, 1, 3);
+            // else 67% goes to the prize pool and the remaining 33% goes to the partner pool
+            if (currentCETOBalance > minimumRequiredAmount) {
+                partnerPoolFunds_ = SafeMath.sub(initialGuaranteedPrizePool, minimumRequiredAmount);
             }
 
             // Check if the amount collected is greater than the initial GPP
-            // if yes than 50% of the difference amount goes to the partner pool
-            if (getCurrentCETOBalance() > initialGuaranteedPrizePool) {
-                uint256 differenceAmount =
-                    getCurrentCETOBalance() - initialGuaranteedPrizePool;
+            // if yes then additionally 50% of the difference amount goes to the partner pool
+            if (currentCETOBalance > initialGuaranteedPrizePool) {
+                uint256 differenceAmount = currentCETOBalance - initialGuaranteedPrizePool;
                 partnerPoolFunds_ = SafeMath.add(
                     partnerPoolFunds_,
                     SafeMath.div(differenceAmount, 2)
@@ -662,52 +675,59 @@ contract BigTent {
 
     function getFunds() public view returns (uint256) {
         uint256 currentPrizePool;
-        uint256 nextPoolFunds = 0;
         uint256 differenceAmount;
+        uint256 currentCETOBalance = getCurrentCETOBalance();
 
         // Calculate 67% of the amout collected
-        uint256 minimumRequiredAmount =
-            mulDiv(initialGuaranteedPrizePool, 2, 3);
+        uint256 minimumRequiredAmount = mulDiv(initialGuaranteedPrizePool, 2, 3);
 
         // Calculate the difference amount if amount collected is greater than the initial gpp
-        if (getCurrentCETOBalance() > initialGuaranteedPrizePool) {
-            differenceAmount =
-                getCurrentCETOBalance() -
-                initialGuaranteedPrizePool;
+        if (currentCETOBalance > initialGuaranteedPrizePool) {
+            differenceAmount = SafeMath.sub(currentCETOBalance, initialGuaranteedPrizePool);
         }
 
         if (partner == address(0)) {
+
             // Check if the amount collected is greater than the initial GPP
             // if yes than 50% of the difference amount goes to the current prize pool
             // and 50% to the next prize pool
-            if (getCurrentCETOBalance() > initialGuaranteedPrizePool) {
+            
+            if (currentCETOBalance > initialGuaranteedPrizePool) {
                 currentPrizePool = SafeMath.add(
                     initialGuaranteedPrizePool,
                     SafeMath.div(differenceAmount, 2)
                 );
-                nextPoolFunds = SafeMath.div(differenceAmount, 2);
-            } else {
+            }
+            else {
                 currentPrizePool = initialGuaranteedPrizePool;
             }
-        } else {
-            // If amount collected is less than equal to 67% than entire collected
-            // amount goes to the current prize pool.
-            // else 67% goes to the current prize pool and rest to the partner pool
-            if (getCurrentCETOBalance() <= minimumRequiredAmount) {
-                currentPrizePool = getCurrentCETOBalance();
-            } else {
-                currentPrizePool = mulDiv(initialGuaranteedPrizePool, 2, 3);
-                // Check if the amount collected is greater than the initial GPP
-                // if yes than 50% of the difference amount goes to partner pool,
-                // 25% to the current prize pool and 25% to the next prize pool
-                if (getCurrentCETOBalance() > initialGuaranteedPrizePool) {
-                    currentPrizePool = SafeMath.add(
-                        currentPrizePool,
-                        SafeMath.div(differenceAmount, 4)
-                    );
-                    nextPoolFunds = SafeMath.div(differenceAmount, 4);
-                }
+
+        } 
+        else {
+
+            // If amount collected is less than equal to 67% of initialGuaranteedPrizePool 
+            // then entire collected amount goes to the current prize pool.
+            // else 67% of initialGuaranteedPrizePool goes to the current prize pool
+
+            if (currentCETOBalance <= minimumRequiredAmount) {
+                currentPrizePool = currentCETOBalance;
+            } 
+
+            else if (currentCETOBalance <= initialGuaranteedPrizePool){
+                currentPrizePool = minimumRequiredAmount;
             }
+
+            // Check if the amount collected is greater than the initial GPP
+            // if yes then 50% of the difference amount goes to partner pool,
+            // 25% to the current prize pool and 25% to the next prize pool
+
+            else {
+                currentPrizePool = SafeMath.add(
+                    minimumRequiredAmount,
+                    SafeMath.div(differenceAmount, 4)
+                );
+            }
+
         }
 
         return currentPrizePool;
@@ -734,8 +754,7 @@ contract BigTent {
 
         address administrator_ = msg.sender;
 
-        address payable administrator_payable =
-            address(uint160(administrator_));
+        address payable administrator_payable = address(uint160(administrator_));
 
         administrator_payable.transfer(address(this).balance);
 
