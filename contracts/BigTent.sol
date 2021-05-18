@@ -584,13 +584,21 @@ contract BigTent {
             firstPrizeProportion + secondPrizeProportion + thirdPrizeProportion;
 
         // Calculate the prize money
-        uint256 firstPrize =
-            mulDiv(currentPoolFunds, firstPrizeProportion, totalProportion);
-        uint256 secondPrize =
-            mulDiv(currentPoolFunds, secondPrizeProportion, totalProportion);
-        uint256 thirdPrize =
-            mulDiv(currentPoolFunds, thirdPrizeProportion, totalProportion);
-        return (firstPrize, secondPrize, thirdPrize);
+        if (totalProportion != 0) {
+            uint256 firstPrize =
+                mulDiv(currentPoolFunds, firstPrizeProportion, totalProportion);
+            uint256 secondPrize =
+                mulDiv(
+                    currentPoolFunds,
+                    secondPrizeProportion,
+                    totalProportion
+                );
+            uint256 thirdPrize =
+                mulDiv(currentPoolFunds, thirdPrizeProportion, totalProportion);
+            return (firstPrize, secondPrize, thirdPrize);
+        } else {
+            return (0, 0, 0);
+        }
     }
 
     function getWinners()
@@ -711,7 +719,6 @@ contract BigTent {
         external
         onlyAdministrator()
     {
-
         require(
             msg.sender != _identifier,
             "The Admin cant change the status for themselves"
