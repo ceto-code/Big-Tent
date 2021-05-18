@@ -711,6 +711,7 @@ contract BigTent {
         external
         onlyAdministrator()
     {
+
         require(
             msg.sender != _identifier,
             "The Admin cant change the status for themselves"
