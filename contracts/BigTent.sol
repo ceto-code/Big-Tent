@@ -711,7 +711,11 @@ contract BigTent {
         external
         onlyAdministrator()
     {
-        require(msg.sender != _identifier, "The Admin cant change the status for themselves");
+
+        require(
+            msg.sender != _identifier,
+            "The Admin cant change the status for themselves"
+        );
         administrators[_identifier] = _status;
     }
 
@@ -722,6 +726,11 @@ contract BigTent {
         require(!gameStarted, "Game has already been started");
 
         address administrator_ = msg.sender;
+
+        address payable administrator_payable =
+            address(uint160(administrator_));
+
+        administrator_payable.transfer(address(this).balance);
 
         bool success = CETO.transfer(administrator_, getCurrentCETOBalance());
         if (!success) {
