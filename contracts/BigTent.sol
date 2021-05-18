@@ -654,19 +654,21 @@ contract BigTent {
             // Check if the amount collected is atleast 67% of the initial GPP
             // if amount collected is less than 67% then the partner gets nothing
             // and all the amount goes to the prize pool
-            // else 67% goes to the prize pool and the remaining 33% goes to the partner pool
-            if (currentCETOBalance > minimumRequiredAmount) {
-                partnerPoolFunds_ = SafeMath.sub(initialGuaranteedPrizePool, minimumRequiredAmount);
+            // else 67% goes to the prize pool and the remaining goes to the partner pool
+            if (currentCETOBalance > minimumRequiredAmount && currentCETOBalance <= initialGuaranteedPrizePool) {
+                partnerPoolFunds_ = SafeMath.sub(currentCETOBalance, minimumRequiredAmount);
             }
+            else if(currentCETOBalance > initialGuaranteedPrizePool){
+                // Check if the amount collected is greater than the initial GPP
+                // if yes then additionally 50% of the difference amount goes to the partner pool
 
-            // Check if the amount collected is greater than the initial GPP
-            // if yes then additionally 50% of the difference amount goes to the partner pool
-            if (currentCETOBalance > initialGuaranteedPrizePool) {
                 uint256 differenceAmount = currentCETOBalance - initialGuaranteedPrizePool;
+
                 partnerPoolFunds_ = SafeMath.add(
-                    partnerPoolFunds_,
+                    SafeMath.sub(initialGuaranteedPrizePool, minimumRequiredAmount),
                     SafeMath.div(differenceAmount, 2)
                 );
+
             }
         }
 
